@@ -1,0 +1,16 @@
+﻿{
+  "concentradores": [
+    {
+      "nombre": "moran valverde",
+      "host": "moranvalverde"
+    },
+    {
+      "nombre": "labrador",
+      "host": "labrador"
+    },
+    {
+      "nombre": "el recreo",
+      "host": "elrecreo"
+    }
+  ]
+}
