@@ -91,6 +91,20 @@ namespace UI
             }
         }
 
+        /// <summary>
+        /// Misma secuencia que usa ApiLog y Reinicio: host principal → bastión → concentrador → root.
+        /// </summary>
+        public void ConnectFullPipeline(string? concentradorHost)
+        {
+            if (string.IsNullOrWhiteSpace(concentradorHost))
+                throw new ArgumentException("Debe seleccionar un concentrador.", nameof(concentradorHost));
+
+            ConnectMain();
+            ConnectBastion();
+            ConnectToConcentrador(concentradorHost);
+            BecomeRoot();
+        }
+
         public string Execute(string command)
         {
             Flush();
@@ -99,6 +113,99 @@ namespace UI
             Thread.Sleep(CommandWait);
 
             return CleanAnsi(ReadAll());
+        }
+
+        /// <summary>
+        /// Ejecuta un comando y emite cada línea completa (p. ej. IDs de <c>docker restart</c>) hasta detectar el prompt del shell.
+        /// </summary>
+        public void ExecuteStreamingLines(string command, Action<string> onLine, CancellationToken cancellationToken = default)
+        {
+            Flush();
+            _stream.WriteLine(command);
+            Thread.Sleep(200);
+
+            var buffer = "";
+            var start = Environment.TickCount64;
+            const long maxMs = 3_600_000L;
+
+            while (Environment.TickCount64 - start < maxMs)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                while (_stream.DataAvailable)
+                {
+                    buffer += CleanAnsi(_stream.Read());
+                    Thread.Sleep(15);
+                }
+
+                if (ProcessStreamingBuffer(ref buffer, onLine))
+                    return;
+
+                Thread.Sleep(40);
+            }
+        }
+
+        /// <returns><see langword="true"/> si se detectó el prompt del shell (fin del comando).</returns>
+        private static bool ProcessStreamingBuffer(ref string buffer, Action<string> onLine)
+        {
+            while (true)
+            {
+                var ix = buffer.IndexOf('\n');
+                if (ix < 0)
+                    break;
+
+                var line = buffer[..ix].TrimEnd('\r');
+                buffer = buffer[(ix + 1)..];
+
+                var trimmed = line.Trim();
+                if (trimmed.Length == 0)
+                    continue;
+
+                if (IsShellPromptLine(trimmed))
+                    return true;
+
+                onLine(trimmed);
+            }
+
+            var tail = buffer.TrimEnd();
+            if (tail.Length > 0 && IsShellPromptLine(tail))
+            {
+                buffer = "";
+                return true;
+            }
+
+            return false;
+        }
+
+        public static bool IsDockerContainerIdLine(string line)
+        {
+            var t = line.Trim();
+            return t.Length >= 12 && t.Length <= 64 && Regex.IsMatch(t, @"^[a-fA-F0-9]+$");
+        }
+
+        private static bool IsShellPromptLine(string line)
+        {
+            var t = line.TrimEnd();
+            if (t.Length == 0)
+                return false;
+
+            if (IsDockerContainerIdLine(t))
+                return false;
+
+            if (t.Contains("└──>", StringComparison.Ordinal))
+                return true;
+
+            if (t.Contains('@', StringComparison.Ordinal) &&
+                (t.EndsWith("#", StringComparison.Ordinal) || t.EndsWith("$", StringComparison.Ordinal)))
+                return true;
+
+            return Regex.IsMatch(t, @"^.+@.+[#$]\s*$");
+        }
+
+        /// <summary>Comillas simples para bash (docker restart 'nombre').</summary>
+        public static string BashSingleQuote(string value)
+        {
+            return "'" + value.Replace("'", "'\\''") + "'";
         }
 
         // 🔥 NUEVO: espera prompt real
@@ -162,7 +269,7 @@ namespace UI
         // 🔥 LIMPIAR ANSI (colores basura)
         private string CleanAnsi(string input)
         {
-            return Regex.Replace(input, @"\x1B\[[0-9;]*[A-Za-z]", "");
+            return Regex.Replace(input, @"\x1B\[[\d?;]*[A-Za-z]", "");
         }
 
         public void Dispose()
