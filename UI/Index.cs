@@ -1,4 +1,7 @@
+using ClosedXML.Excel;
 using Newtonsoft.Json;
+using System.Configuration;
+using System.Data;
 using System.Text.RegularExpressions;
 using System.Drawing;
 
@@ -14,6 +17,12 @@ public partial class Index : Form
 
     private bool _syncingDockerChecks = false;
     private readonly List<DockerRowState> _dockerRows = new();
+
+    /// <summary>Esquema usado en la última conexión exitosa a tablas (para Generar Script).</summary>
+    private string? _sqlEsquemaActual;
+
+    /// <summary>Índice de fila donde se abrió el menú contextual (clic derecho); más fiable que CurrentRow tras Show.</summary>
+    private int _sqlMenuFilaIndice = -1;
 
     private sealed class DockerRowState
     {
@@ -32,9 +41,49 @@ public partial class Index : Form
     {
         InitializeComponent();
         this.Load += Index_Load;
+        this.Shown += (_, _) => AjustarSplittersSql();
 
         this.KeyPreview = true;
         this.KeyDown += Index_KeyDown;
+    }
+
+    /// <summary>
+    /// Evita InvalidOperationException si el diseñador deja SplitterDistance fuera de rango respecto a los MinSize.
+    /// </summary>
+    private void AjustarSplittersSql()
+    {
+        try
+        {
+            var w = splitContainerSql.Width;
+            var sw = splitContainerSql.SplitterWidth;
+            if (w > 0)
+            {
+                var max1 = w - splitContainerSql.Panel2MinSize - sw;
+                var min1 = splitContainerSql.Panel1MinSize;
+                if (max1 >= min1)
+                    splitContainerSql.SplitterDistance = Math.Clamp(320, min1, max1);
+            }
+        }
+        catch
+        {
+            /* tamaño inicial del host aún no aplicado */
+        }
+
+        try
+        {
+            var h = splitSqlEditorResultados.Height;
+            var sw = splitSqlEditorResultados.SplitterWidth;
+            if (h > 0)
+            {
+                var max1 = h - splitSqlEditorResultados.Panel2MinSize - sw;
+                var min1 = splitSqlEditorResultados.Panel1MinSize;
+                if (max1 >= min1)
+                    splitSqlEditorResultados.SplitterDistance = Math.Clamp(200, min1, max1);
+            }
+        }
+        catch
+        {
+        }
     }
 
     private void Index_Load(object? sender, EventArgs e)
@@ -58,6 +107,35 @@ public partial class Index : Form
         progressBarReinicio.MarqueeAnimationSpeed = 35;
         progressBarReinicio.Visible = false;
         lblReinicioBusy.Visible = false;
+
+        progressBarSql.Style = ProgressBarStyle.Marquee;
+        progressBarSql.MarqueeAnimationSpeed = 35;
+        progressBarSql.Visible = false;
+        lblSqlBusy.Visible = false;
+
+        progressBarSqlConsulta.Style = ProgressBarStyle.Marquee;
+        progressBarSqlConsulta.MarqueeAnimationSpeed = 35;
+        progressBarSqlConsulta.Visible = false;
+        lblSqlConsultaBusy.Visible = false;
+
+        dgvSqlResultados.ColumnHeadersDefaultCellStyle.Font = new Font(dgvSqlResultados.Font, FontStyle.Bold);
+
+        contextMenuSqlTablas.Closed += (_, _) => _sqlMenuFilaIndice = -1;
+
+        dgvSqlListaTablas.AutoGenerateColumns = false;
+        dgvSqlListaTablas.Columns.Clear();
+        dgvSqlListaTablas.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "colTablaSql",
+            HeaderText = "Tablas",
+            ReadOnly = true,
+            SortMode = DataGridViewColumnSortMode.Automatic,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            MinimumWidth = 60,
+            FillWeight = 100,
+        });
+        dgvSqlListaTablas.ColumnHeadersDefaultCellStyle.Font = new Font(dgvSqlListaTablas.Font, FontStyle.Bold);
+        dgvSqlListaTablas.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
     }
 
     // 🔹 JSON
@@ -556,5 +634,417 @@ public partial class Index : Form
     {
         id = id.Trim().ToLowerInvariant();
         return id.Length > 12 ? id[..12] : id;
+    }
+
+    private async void btnSqlConectar_Click(object? sender, EventArgs e)
+    {
+        var host = ddlConcentrador.SelectedValue?.ToString();
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            MessageBox.Show("Seleccione un concentrador.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var container = ConfigurationManager.AppSettings["DbContainerName"]?.Trim() ?? "concentrador_db";
+        var schema = ConfigurationManager.AppSettings["DbSchema"]?.Trim() ?? "concentrador";
+        var user = ConfigurationManager.AppSettings["DbUser"]?.Trim() ?? "root";
+        var clientBin = ConfigurationManager.AppSettings["DbClientBinary"]?.Trim();
+        if (string.IsNullOrWhiteSpace(clientBin))
+            clientBin = "mariadb";
+        var password = ObtenerPasswordDb();
+
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            MessageBox.Show(
+                "Configure DbPassword en App.config o defina GlobalPassword.",
+                "SQL",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!EsIdentificadorSqlSimple(schema))
+        {
+            MessageBox.Show(
+                "DbSchema solo puede contener letras, números y guión bajo.",
+                "SQL",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!EsNombreContenedorDb(container))
+        {
+            MessageBox.Show("DbContainerName no es válido.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!Regex.IsMatch(user, @"^[a-zA-Z0-9_.-]+$"))
+        {
+            MessageBox.Show("DbUser no es válido.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!EsClienteDbBinarioPermitido(clientBin))
+        {
+            MessageBox.Show(
+                "DbClientBinary debe ser un nombre seguro (p. ej. mariadb, mysql) o una ruta absoluta dentro del contenedor (p. ej. /usr/bin/mariadb).",
+                "SQL",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        btnSqlConectar.Enabled = false;
+        SetSqlConexionBusy(true);
+        try
+        {
+            var cmd = ComandoDockerMysqlShowTables(container, clientBin, user, password, schema);
+            string raw = "";
+            await Task.Run(() =>
+            {
+                using var ssh = new SshManager();
+                ssh.ConnectFullPipeline(host);
+                raw = ssh.Execute(cmd);
+            });
+
+            var clean = CleanOutput(raw);
+            var tablas = ShowTablesOutputParser.Parse(clean);
+
+            dgvSqlListaTablas.Rows.Clear();
+            foreach (var t in tablas)
+                dgvSqlListaTablas.Rows.Add(t);
+
+            _sqlEsquemaActual = schema;
+
+            if (tablas.Count == 0)
+            {
+                var preview = clean.Length > 400 ? clean[..400] + "…" : clean;
+                MessageBox.Show(
+                    "No se obtuvo ninguna tabla. Revise el contenedor, credenciales y que el esquema exista.\n\nSalida (recorte):\n" + preview,
+                    "SQL",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Error al conectar o consultar: " + ex.Message, "SQL", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetSqlConexionBusy(false);
+            btnSqlConectar.Enabled = true;
+        }
+    }
+
+    private void SetSqlConexionBusy(bool busy)
+    {
+        progressBarSql.Visible = busy;
+        lblSqlBusy.Visible = busy;
+        if (busy)
+            progressBarSql.Style = ProgressBarStyle.Marquee;
+    }
+
+    private static string ObtenerPasswordDb()
+    {
+        var p = ConfigurationManager.AppSettings["DbPassword"];
+        if (string.IsNullOrWhiteSpace(p))
+            p = ConfigurationManager.AppSettings["GlobalPassword"];
+        return p ?? "";
+    }
+
+    private static bool EsIdentificadorSqlSimple(string s) =>
+        !string.IsNullOrWhiteSpace(s) && Regex.IsMatch(s, @"^[a-zA-Z0-9_]+$");
+
+    private static bool EsNombreContenedorDb(string s) =>
+        !string.IsNullOrWhiteSpace(s) && Regex.IsMatch(s, @"^[a-zA-Z0-9_.-]+$");
+
+    /// <summary>Solo nombre de ejecutable o ruta absoluta sin metacaracteres de shell.</summary>
+    private static bool EsClienteDbBinarioPermitido(string s) =>
+        Regex.IsMatch(s, @"^[a-zA-Z][a-zA-Z0-9_.-]*$", RegexOptions.CultureInvariant)
+        || Regex.IsMatch(s, @"^/[a-zA-Z0-9./_-]+$", RegexOptions.CultureInvariant);
+
+    private static string ComandoDockerMysqlShowTables(string contenedor, string clienteBinario, string usuario, string password, string esquema)
+    {
+        var sql = $"USE `{esquema}`; SHOW TABLES;";
+        return $"docker exec {contenedor} {clienteBinario} --user={usuario} --password={SshManager.BashSingleQuote(password)} -N -B -e {SshManager.BashSingleQuote(sql)}";
+    }
+
+    private static string ComandoDockerMysqlEjecutar(string contenedor, string clienteBinario, string usuario, string password, string sqlConsulta)
+    {
+        sqlConsulta = NormalizarSqlParaEnvioPorShell(sqlConsulta);
+        return $"docker exec {contenedor} {clienteBinario} --user={usuario} --password={SshManager.BashSingleQuote(password)} -B -e {SshManager.BashSingleQuote(sqlConsulta)}";
+    }
+
+    /// <summary>
+    /// El comando se envía por shell con WriteLine; si el SQL lleva \n, el intérprete corta la orden antes del cierre de comillas de -e.
+    /// Se reemplazan saltos de línea por espacios (equivalente habitual para el cliente mysql/mariadb).
+    /// </summary>
+    private static string NormalizarSqlParaEnvioPorShell(string sql)
+    {
+        sql = sql.Trim();
+        return sql.Length == 0 ? sql : Regex.Replace(sql, @"[\r\n]+", " ");
+    }
+
+    private void dgvSqlListaTablas_MouseDown(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Right)
+            return;
+
+        var hit = dgvSqlListaTablas.HitTest(e.X, e.Y);
+        if (hit.RowIndex < 0 || hit.RowIndex >= dgvSqlListaTablas.Rows.Count)
+            return;
+
+        _sqlMenuFilaIndice = hit.RowIndex;
+        dgvSqlListaTablas.ClearSelection();
+        dgvSqlListaTablas.Rows[hit.RowIndex].Selected = true;
+        if (dgvSqlListaTablas.Columns.Count > 0)
+        {
+            var colIdx = hit.ColumnIndex >= 0 ? hit.ColumnIndex : 0;
+            if (colIdx >= dgvSqlListaTablas.Columns.Count)
+                colIdx = 0;
+            dgvSqlListaTablas.CurrentCell = dgvSqlListaTablas.Rows[hit.RowIndex].Cells[colIdx];
+        }
+
+        contextMenuSqlTablas.Show(dgvSqlListaTablas, new Point(e.X, e.Y));
+    }
+
+    private async void toolStripMenuItemSqlGenerar_Click(object? sender, EventArgs e)
+    {
+        await GenerarScriptYEjecutarAsync();
+    }
+
+    private async void btnSqlEjecutar_Click(object? sender, EventArgs e)
+    {
+        await EjecutarConsultaSqlAsync();
+    }
+
+    private async Task GenerarScriptYEjecutarAsync()
+    {
+        var idx = _sqlMenuFilaIndice;
+        if (idx < 0 && dgvSqlListaTablas.CurrentRow != null)
+            idx = dgvSqlListaTablas.CurrentRow.Index;
+        if (idx < 0 || idx >= dgvSqlListaTablas.Rows.Count)
+        {
+            MessageBox.Show("Seleccione una tabla (clic derecho sobre la fila).", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var nombreTabla = dgvSqlListaTablas.Rows[idx].Cells[0].Value?.ToString()?.Trim();
+        if (string.IsNullOrEmpty(nombreTabla) || !EsIdentificadorSqlSimple(nombreTabla))
+        {
+            MessageBox.Show("Seleccione una fila con un nombre de tabla válido.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var schema = _sqlEsquemaActual ?? ConfigurationManager.AppSettings["DbSchema"]?.Trim() ?? "concentrador";
+        if (!EsIdentificadorSqlSimple(schema))
+            schema = "concentrador";
+
+        txtSqlEditor.Text = $"SELECT * FROM `{schema}`.`{nombreTabla}` LIMIT 300;";
+        await EjecutarConsultaSqlAsync();
+    }
+
+    private async Task EjecutarConsultaSqlAsync()
+    {
+        var sql = NormalizarSqlParaEnvioPorShell(txtSqlEditor.Text);
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            MessageBox.Show("Escriba una consulta SQL.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var host = ddlConcentrador.SelectedValue?.ToString();
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            MessageBox.Show("Seleccione un concentrador.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var container = ConfigurationManager.AppSettings["DbContainerName"]?.Trim() ?? "concentrador_db";
+        var user = ConfigurationManager.AppSettings["DbUser"]?.Trim() ?? "root";
+        var clientBin = ConfigurationManager.AppSettings["DbClientBinary"]?.Trim();
+        if (string.IsNullOrWhiteSpace(clientBin))
+            clientBin = "mariadb";
+        var password = ObtenerPasswordDb();
+
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            MessageBox.Show("Configure DbPassword o GlobalPassword.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!EsNombreContenedorDb(container) || !Regex.IsMatch(user, @"^[a-zA-Z0-9_.-]+$") || !EsClienteDbBinarioPermitido(clientBin))
+        {
+            MessageBox.Show("Revise DbContainerName, DbUser y DbClientBinary en App.config.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        btnSqlEjecutar.Enabled = false;
+        btnSqlConectar.Enabled = false;
+        btnSqlExportarExcel.Enabled = false;
+        SetSqlConsultaBusy(true);
+        try
+        {
+            var cmd = ComandoDockerMysqlEjecutar(container, clientBin, user, password, sql);
+            string raw = "";
+            await Task.Run(() =>
+            {
+                using var ssh = new SshManager();
+                ssh.ConnectFullPipeline(host);
+                raw = ssh.ExecuteWithDrainedOutput(cmd, initialWaitMs: null, quietWaitMs: 2000, maxMsBeforeFirstByte: 90_000);
+            });
+
+            var clean = CleanOutput(raw);
+            var (tabla, err) = MariaDbBatchTsvParser.TryParse(clean);
+
+            if (!string.IsNullOrEmpty(err))
+            {
+                MessageBox.Show(
+                    "La base de datos devolvió un error o no se pudo interpretar la salida:\n\n" + err,
+                    "SQL",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                LimpiarGridResultadosSql();
+                return;
+            }
+
+            if (tabla is null)
+            {
+                LimpiarGridResultadosSql();
+                return;
+            }
+
+            if (tabla.Columns.Count == 0)
+            {
+                var preview = clean.Length > 700 ? "…" + clean[^700..] : clean;
+                preview = string.IsNullOrWhiteSpace(preview)
+                    ? "(sin texto en la salida; el comando puede haber tardado demasiado o no haber devuelto datos)."
+                    : preview.Trim();
+                MessageBox.Show(
+                    "No se pudieron leer columnas del resultado (salida vacía o solo avisos del shell).\n\n"
+                    + "Revise la consulta, la conexión SSH y, si hace falta, aumente CommandWaitMs en App.config.\n\n"
+                    + "Recorte de salida recibida:\n" + preview,
+                    "SQL",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                LimpiarGridResultadosSql();
+                return;
+            }
+
+            dgvSqlResultados.AutoGenerateColumns = true;
+            dgvSqlResultados.DataSource = null;
+            dgvSqlResultados.Columns.Clear();
+            dgvSqlResultados.DataSource = tabla;
+
+            AjustarColumnasResultadosSqlDespuesDeCargar();
+
+            if (tabla.Rows.Count == 0)
+            {
+                MessageBox.Show(
+                    "La consulta se ejecutó correctamente pero no devolvió filas.",
+                    "SQL",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Error al ejecutar la consulta: " + ex.Message, "SQL", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            LimpiarGridResultadosSql();
+        }
+        finally
+        {
+            SetSqlConsultaBusy(false);
+            btnSqlEjecutar.Enabled = true;
+            btnSqlConectar.Enabled = true;
+            btnSqlExportarExcel.Enabled = true;
+        }
+    }
+
+    private void SetSqlConsultaBusy(bool busy)
+    {
+        progressBarSqlConsulta.Visible = busy;
+        lblSqlConsultaBusy.Visible = busy;
+        if (busy)
+            progressBarSqlConsulta.Style = ProgressBarStyle.Marquee;
+    }
+
+    /// <summary>
+    /// Cabeceras en negrita y anchos iniciales; luego el usuario puede redimensionar columnas a mano.
+    /// </summary>
+    private void AjustarColumnasResultadosSqlDespuesDeCargar()
+    {
+        dgvSqlResultados.ColumnHeadersDefaultCellStyle.Font = new Font(dgvSqlResultados.Font, FontStyle.Bold);
+        foreach (DataGridViewColumn c in dgvSqlResultados.Columns)
+            c.AutoSizeMode = DataGridViewAutoSizeColumnMode.AllCells;
+        dgvSqlResultados.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.AllCells);
+        foreach (DataGridViewColumn c in dgvSqlResultados.Columns)
+        {
+            c.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+            c.MinimumWidth = 56;
+        }
+    }
+
+    private void btnSqlExportarExcel_Click(object? sender, EventArgs e)
+    {
+        if (dgvSqlResultados.Columns.Count == 0 || dgvSqlResultados.Rows.Count == 0)
+        {
+            MessageBox.Show(
+                "No hay datos en la grilla para exportar. Ejecute una consulta primero.",
+                "SQL",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dlg = new SaveFileDialog
+        {
+            Filter = "Excel (*.xlsx)|*.xlsx",
+            DefaultExt = "xlsx",
+            FileName = "resultados_sql.xlsx",
+            Title = "Exportar a Excel",
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        try
+        {
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Resultados");
+            var colCount = dgvSqlResultados.Columns.Count;
+            var rowCount = dgvSqlResultados.Rows.Count;
+
+            for (var c = 0; c < colCount; c++)
+            {
+                var cell = ws.Cell(1, c + 1);
+                cell.Value = dgvSqlResultados.Columns[c].HeaderText;
+                cell.Style.Font.Bold = true;
+            }
+
+            for (var r = 0; r < rowCount; r++)
+            {
+                for (var c = 0; c < colCount; c++)
+                {
+                    var v = dgvSqlResultados.Rows[r].Cells[c].Value;
+                    ws.Cell(r + 2, c + 1).Value = v?.ToString() ?? "";
+                }
+            }
+
+            ws.Columns().AdjustToContents();
+            wb.SaveAs(dlg.FileName);
+            MessageBox.Show("Archivo guardado:\n" + dlg.FileName, "SQL", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("No se pudo exportar: " + ex.Message, "SQL", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void LimpiarGridResultadosSql()
+    {
+        dgvSqlResultados.DataSource = null;
+        dgvSqlResultados.Columns.Clear();
     }
 }

@@ -108,11 +108,99 @@ namespace UI
         public string Execute(string command)
         {
             Flush();
+            DrainPendingOutput(quietWaitMs: 280, maxTotalMs: 20_000);
 
             _stream.WriteLine(command);
             Thread.Sleep(CommandWait);
 
             return CleanAnsi(ReadAll());
+        }
+
+        /// <summary>
+        /// Igual que <see cref="Execute"/> pero sigue leyendo el stream hasta que deje de llegar datos un tiempo (útil para consultas grandes).
+        /// </summary>
+        /// <param name="quietWaitMs">Silencio tras el último byte recibido para considerar fin de salida.</param>
+        /// <param name="maxMsBeforeFirstByte">Si aún no llegó nada, seguir esperando hasta este límite (evita cortar a 500 ms cuando el servidor tarda en responder).</param>
+        public string ExecuteWithDrainedOutput(string command, int? initialWaitMs = null, int quietWaitMs = 450, int maxMsBeforeFirstByte = 60_000)
+        {
+            Flush();
+            // Evita mezclar MOTD/neofetch del login (aún llegando) con la salida de docker/mariadb.
+            DrainPendingOutput(quietWaitMs: 280, maxTotalMs: 20_000);
+
+            _stream.WriteLine(command);
+            Thread.Sleep(initialWaitMs ?? CommandWait);
+
+            return CleanAnsi(ReadUntilQuiet(quietWaitMs, maxMsBeforeFirstByte));
+        }
+
+        /// <summary>
+        /// Descarta bytes pendientes hasta silencio. Si no hay nada en buffer, sale al instante (no penaliza cada comando).
+        /// </summary>
+        private void DrainPendingOutput(int quietWaitMs, int maxTotalMs)
+        {
+            var lastData = Environment.TickCount64;
+            var start = Environment.TickCount64;
+            var seenData = false;
+
+            while (Environment.TickCount64 - start < maxTotalMs)
+            {
+                var hubo = false;
+                while (_stream.DataAvailable)
+                {
+                    _stream.Read();
+                    hubo = true;
+                    seenData = true;
+                    lastData = Environment.TickCount64;
+                    Thread.Sleep(15);
+                }
+
+                if (!hubo)
+                {
+                    if (!seenData)
+                        break;
+                    if (Environment.TickCount64 - lastData >= quietWaitMs)
+                        break;
+                }
+
+                Thread.Sleep(35);
+            }
+        }
+
+        private string ReadUntilQuiet(int quietWaitMs, int maxMsBeforeFirstByte)
+        {
+            var sb = new System.Text.StringBuilder();
+            var lastData = Environment.TickCount64;
+            var start = Environment.TickCount64;
+            var seenData = false;
+            const int maxTotalMs = 180_000;
+
+            while (Environment.TickCount64 - start < maxTotalMs)
+            {
+                var hubo = false;
+                while (_stream.DataAvailable)
+                {
+                    sb.Append(_stream.Read());
+                    hubo = true;
+                    seenData = true;
+                    lastData = Environment.TickCount64;
+                    Thread.Sleep(25);
+                }
+
+                if (!hubo)
+                {
+                    if (!seenData)
+                    {
+                        if (Environment.TickCount64 - start >= maxMsBeforeFirstByte)
+                            break;
+                    }
+                    else if (Environment.TickCount64 - lastData >= quietWaitMs)
+                        break;
+                }
+
+                Thread.Sleep(35);
+            }
+
+            return sb.ToString();
         }
 
         /// <summary>
