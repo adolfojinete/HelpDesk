@@ -16,7 +16,19 @@ namespace UI
         private readonly string BastionHost = ConfigurationManager.AppSettings["BastionHost"];
         private readonly string BastionUser = ConfigurationManager.AppSettings["BastionUser"];
 
-        private readonly string Password = ConfigurationManager.AppSettings["GlobalPassword"];
+        /// <summary>Contraseña SSH (bastión, concentrador). Trimeada al leer.</summary>
+        private readonly string Password = ConfigurationManager.AppSettings["GlobalPassword"]?.Trim() ?? "";
+
+        /// <summary>Contraseña de <c>su -</c> (root). Si la clave existe vacía o no está, se usa <see cref="Password"/>.</summary>
+        private readonly string SuPassword = ObtenerSuRootPassword();
+
+        private static string ObtenerSuRootPassword()
+        {
+            var su = ConfigurationManager.AppSettings["SuRootPassword"]?.Trim();
+            if (!string.IsNullOrEmpty(su))
+                return su;
+            return ConfigurationManager.AppSettings["GlobalPassword"]?.Trim() ?? "";
+        }
 
         private readonly int Timeout = int.Parse(ConfigurationManager.AppSettings["ShellTimeoutMs"]);
         private readonly int CommandWait = int.Parse(ConfigurationManager.AppSettings["CommandWaitMs"]);
@@ -82,14 +94,55 @@ namespace UI
         {
             _stream.WriteLine("su -");
 
-            var output = WaitFor("Password:", "Contraseña:");
+            // No usar WaitFor() genérico: devuelve al ver '$' del prompt anterior (user@host:~$)
+            // y se pierde el prompt de su, o se envía la contraseña en mal momento → Fallo de autenticación.
+            var output = WaitForSuPasswordPrompt();
 
-            if (output.Contains("Password") || output.Contains("Contraseña"))
+            if (IndicaFalloSuSinPedirPassword(output))
+                return;
+
+            if (ContienePromptPasswordSu(output))
             {
-                _stream.WriteLine(Password);
+                _stream.WriteLine(SuPassword);
                 WaitForPrompt();
             }
         }
+
+        /// <summary>Espera solo el prompt de contraseña de su (locale), sin cortar al ver el $ del prompt previo.</summary>
+        private string WaitForSuPasswordPrompt()
+        {
+            var start = Environment.TickCount;
+            var buffer = "";
+
+            while (Environment.TickCount - start < Timeout)
+            {
+                if (_stream.DataAvailable)
+                {
+                    buffer += _stream.Read();
+                    var clean = CleanAnsi(buffer);
+
+                    if (ContienePromptPasswordSu(clean))
+                        return clean;
+
+                    if (IndicaFalloSuSinPedirPassword(clean))
+                        return clean;
+                }
+
+                Thread.Sleep(200);
+            }
+
+            throw new Exception("Timeout esperando prompt de contraseña (su).\n" + CleanAnsi(buffer));
+        }
+
+        private static bool ContienePromptPasswordSu(string clean) =>
+            clean.Contains("assword:", StringComparison.OrdinalIgnoreCase)
+            || clean.Contains("ontraseña:", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IndicaFalloSuSinPedirPassword(string clean) =>
+            clean.Contains("Fallo de autenticación", StringComparison.OrdinalIgnoreCase)
+            || clean.Contains("Authentication failure", StringComparison.OrdinalIgnoreCase)
+            || (clean.Contains("su:", StringComparison.OrdinalIgnoreCase)
+                && clean.Contains("failure", StringComparison.OrdinalIgnoreCase));
 
         /// <summary>
         /// Misma secuencia que usa ApiLog y Reinicio: host principal → bastión → concentrador → root.

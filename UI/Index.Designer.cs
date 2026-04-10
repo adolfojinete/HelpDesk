@@ -35,10 +35,13 @@
             chkTodosDocker = new CheckBox();
             lblReinicioSinDockers = new Label();
             panelReinicioToolbar = new Panel();
+            lblCargarDockersBusy = new Label();
+            progressBarCargarDockers = new ProgressBar();
+            btnCargarDockers = new Button();
+            panelReinicioPie = new Panel();
             lblReinicioBusy = new Label();
             progressBarReinicio = new ProgressBar();
             btnReiniciar = new Button();
-            btnCargarDockers = new Button();
             tabPage3 = new TabPage();
             panelSqlToolbar = new Panel();
             lblSqlBusy = new Label();
@@ -64,6 +67,7 @@
             panelLogsTop.SuspendLayout();
             tabPage2.SuspendLayout();
             panelReinicioBody.SuspendLayout();
+            panelReinicioPie.SuspendLayout();
             panelReinicioTodosBar.SuspendLayout();
             panelReinicioToolbar.SuspendLayout();
             tabPage3.SuspendLayout();
@@ -109,6 +113,8 @@
             ddlConcentrador.Name = "ddlConcentrador";
             ddlConcentrador.Size = new Size(350, 33);
             ddlConcentrador.TabIndex = 1;
+            ddlConcentrador.SelectedIndexChanged += ddlConcentrador_SelectedIndexChanged;
+            ddlConcentrador.SelectionChangeCommitted += ddlConcentrador_SelectionChangeCommitted;
             // 
             // tabControl1
             // 
@@ -121,6 +127,7 @@
             tabControl1.SelectedIndex = 0;
             tabControl1.Size = new Size(1200, 630);
             tabControl1.TabIndex = 0;
+            tabControl1.SelectedIndexChanged += tabControl1_SelectedIndexChanged;
             // 
             // tabPage1
             // 
@@ -213,9 +220,10 @@
             // 
             // panelReinicioBody
             // 
-            panelReinicioBody.Controls.Add(flowLayoutPanelDockers);
-            panelReinicioBody.Controls.Add(panelReinicioTodosBar);
+            panelReinicioBody.Controls.Add(panelReinicioPie);
             panelReinicioBody.Controls.Add(lblReinicioSinDockers);
+            panelReinicioBody.Controls.Add(panelReinicioTodosBar);
+            panelReinicioBody.Controls.Add(flowLayoutPanelDockers);
             panelReinicioBody.Dock = DockStyle.Fill;
             panelReinicioBody.Location = new Point(8, 64);
             panelReinicioBody.Name = "panelReinicioBody";
@@ -272,11 +280,60 @@
             lblReinicioSinDockers.Text = "No se encontraron contenedores Docker en este concentrador seleccionado.";
             lblReinicioSinDockers.Visible = false;
             // 
+            // panelReinicioPie
+            // 
+            panelReinicioPie.Controls.Add(btnReiniciar);
+            panelReinicioPie.Controls.Add(lblReinicioBusy);
+            panelReinicioPie.Controls.Add(progressBarReinicio);
+            panelReinicioPie.Dock = DockStyle.Bottom;
+            panelReinicioPie.Location = new Point(0, 432);
+            panelReinicioPie.Name = "panelReinicioPie";
+            panelReinicioPie.Padding = new Padding(0, 4, 0, 8);
+            panelReinicioPie.Size = new Size(1176, 88);
+            panelReinicioPie.TabIndex = 4;
+            panelReinicioPie.Visible = false;
+            // 
+            // progressBarReinicio
+            // 
+            progressBarReinicio.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            progressBarReinicio.Location = new Point(0, 4);
+            progressBarReinicio.MarqueeAnimationSpeed = 35;
+            progressBarReinicio.Name = "progressBarReinicio";
+            progressBarReinicio.Size = new Size(200, 26);
+            progressBarReinicio.Style = ProgressBarStyle.Marquee;
+            progressBarReinicio.TabIndex = 0;
+            progressBarReinicio.Visible = false;
+            // 
+            // lblReinicioBusy
+            // 
+            lblReinicioBusy.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            lblReinicioBusy.AutoEllipsis = true;
+            lblReinicioBusy.AutoSize = false;
+            lblReinicioBusy.ForeColor = SystemColors.GrayText;
+            lblReinicioBusy.Location = new Point(208, 6);
+            lblReinicioBusy.Name = "lblReinicioBusy";
+            lblReinicioBusy.Size = new Size(960, 28);
+            lblReinicioBusy.TabIndex = 1;
+            lblReinicioBusy.Text = "Reiniciando contenedores en el concentrador…";
+            lblReinicioBusy.TextAlign = ContentAlignment.MiddleLeft;
+            lblReinicioBusy.Visible = false;
+            // 
+            // btnReiniciar
+            // 
+            btnReiniciar.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            btnReiniciar.Location = new Point(0, 38);
+            btnReiniciar.Name = "btnReiniciar";
+            btnReiniciar.Size = new Size(180, 36);
+            btnReiniciar.TabIndex = 2;
+            btnReiniciar.Text = "Reiniciar";
+            btnReiniciar.UseVisualStyleBackColor = true;
+            btnReiniciar.Visible = false;
+            btnReiniciar.Click += btnReiniciar_Click;
+            // 
             // panelReinicioToolbar
             // 
-            panelReinicioToolbar.Controls.Add(lblReinicioBusy);
-            panelReinicioToolbar.Controls.Add(progressBarReinicio);
-            panelReinicioToolbar.Controls.Add(btnReiniciar);
+            panelReinicioToolbar.Controls.Add(lblCargarDockersBusy);
+            panelReinicioToolbar.Controls.Add(progressBarCargarDockers);
             panelReinicioToolbar.Controls.Add(btnCargarDockers);
             panelReinicioToolbar.Dock = DockStyle.Top;
             panelReinicioToolbar.Location = new Point(8, 8);
@@ -284,40 +341,6 @@
             panelReinicioToolbar.Padding = new Padding(0, 0, 0, 8);
             panelReinicioToolbar.Size = new Size(1176, 56);
             panelReinicioToolbar.TabIndex = 0;
-            // 
-            // lblReinicioBusy
-            // 
-            lblReinicioBusy.AutoEllipsis = true;
-            lblReinicioBusy.AutoSize = true;
-            lblReinicioBusy.ForeColor = SystemColors.GrayText;
-            lblReinicioBusy.Location = new Point(624, 13);
-            lblReinicioBusy.MaximumSize = new Size(520, 0);
-            lblReinicioBusy.Name = "lblReinicioBusy";
-            lblReinicioBusy.Size = new Size(380, 25);
-            lblReinicioBusy.TabIndex = 3;
-            lblReinicioBusy.Text = "Reiniciando contenedores en el concentrador…";
-            lblReinicioBusy.Visible = false;
-            // 
-            // progressBarReinicio
-            // 
-            progressBarReinicio.Location = new Point(418, 10);
-            progressBarReinicio.MarqueeAnimationSpeed = 35;
-            progressBarReinicio.Name = "progressBarReinicio";
-            progressBarReinicio.Size = new Size(200, 26);
-            progressBarReinicio.Style = ProgressBarStyle.Marquee;
-            progressBarReinicio.TabIndex = 2;
-            progressBarReinicio.Visible = false;
-            // 
-            // btnReiniciar
-            // 
-            btnReiniciar.Location = new Point(228, 6);
-            btnReiniciar.Name = "btnReiniciar";
-            btnReiniciar.Size = new Size(180, 36);
-            btnReiniciar.TabIndex = 1;
-            btnReiniciar.Text = "Reiniciar";
-            btnReiniciar.UseVisualStyleBackColor = true;
-            btnReiniciar.Visible = false;
-            btnReiniciar.Click += btnReiniciar_Click;
             // 
             // btnCargarDockers
             // 
@@ -328,6 +351,30 @@
             btnCargarDockers.Text = "Cargar contenedores";
             btnCargarDockers.UseVisualStyleBackColor = true;
             btnCargarDockers.Click += btnCargarDockers_Click;
+            // 
+            // progressBarCargarDockers
+            // 
+            progressBarCargarDockers.Location = new Point(228, 10);
+            progressBarCargarDockers.MarqueeAnimationSpeed = 35;
+            progressBarCargarDockers.Name = "progressBarCargarDockers";
+            progressBarCargarDockers.Size = new Size(180, 26);
+            progressBarCargarDockers.Style = ProgressBarStyle.Marquee;
+            progressBarCargarDockers.TabIndex = 4;
+            progressBarCargarDockers.Visible = false;
+            // 
+            // lblCargarDockersBusy
+            // 
+            lblCargarDockersBusy.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            lblCargarDockersBusy.AutoEllipsis = true;
+            lblCargarDockersBusy.AutoSize = false;
+            lblCargarDockersBusy.ForeColor = SystemColors.GrayText;
+            lblCargarDockersBusy.Location = new Point(416, 11);
+            lblCargarDockersBusy.Name = "lblCargarDockersBusy";
+            lblCargarDockersBusy.Size = new Size(752, 28);
+            lblCargarDockersBusy.TabIndex = 5;
+            lblCargarDockersBusy.Text = "Obteniendo contenedores en el concentrador…";
+            lblCargarDockersBusy.TextAlign = ContentAlignment.MiddleLeft;
+            lblCargarDockersBusy.Visible = false;
             // 
             // tabPage3
             // 
@@ -590,6 +637,7 @@
             tabPage2.ResumeLayout(false);
             panelReinicioBody.ResumeLayout(false);
             panelReinicioBody.PerformLayout();
+            panelReinicioPie.ResumeLayout(false);
             panelReinicioTodosBar.ResumeLayout(false);
             panelReinicioTodosBar.PerformLayout();
             panelReinicioToolbar.ResumeLayout(false);
@@ -620,10 +668,13 @@
         private TabPage tabPage2;
         private Panel panelReinicioToolbar;
         private Button btnCargarDockers;
+        private ProgressBar progressBarCargarDockers;
+        private Label lblCargarDockersBusy;
         private Button btnReiniciar;
         private ProgressBar progressBarReinicio;
         private Label lblReinicioBusy;
         private Panel panelReinicioBody;
+        private Panel panelReinicioPie;
         private Label lblReinicioSinDockers;
         private Panel panelReinicioTodosBar;
         private CheckBox chkTodosDocker;

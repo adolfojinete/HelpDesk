@@ -24,6 +24,12 @@ public partial class Index : Form
     /// <summary>Índice de fila donde se abrió el menú contextual (clic derecho); más fiable que CurrentRow tras Show.</summary>
     private int _sqlMenuFilaIndice = -1;
 
+    /// <summary>Evita resetear la UI al asignar el DataSource del combo al iniciar.</summary>
+    private bool _suprimirEventoConcentrador;
+
+    /// <summary>Último host con el que se alineó la UI; evita fallos de SelectedValue en el mismo tick que SelectedIndexChanged.</summary>
+    private string? _hostConcentradorTrackeado;
+
     private sealed class DockerRowState
     {
         public required Panel RowPanel { get; init; }
@@ -107,6 +113,12 @@ public partial class Index : Form
         progressBarReinicio.MarqueeAnimationSpeed = 35;
         progressBarReinicio.Visible = false;
         lblReinicioBusy.Visible = false;
+        panelReinicioPie.Visible = false;
+
+        progressBarCargarDockers.Style = ProgressBarStyle.Marquee;
+        progressBarCargarDockers.MarqueeAnimationSpeed = 35;
+        progressBarCargarDockers.Visible = false;
+        lblCargarDockersBusy.Visible = false;
 
         progressBarSql.Style = ProgressBarStyle.Marquee;
         progressBarSql.MarqueeAnimationSpeed = 35;
@@ -148,14 +160,93 @@ public partial class Index : Form
             var json = File.ReadAllText(path);
             var config = JsonConvert.DeserializeObject<Config>(json);
 
-            ddlConcentrador.DataSource = config?.concentradores;
-            ddlConcentrador.DisplayMember = "nombre";
-            ddlConcentrador.ValueMember = "host";
+            _suprimirEventoConcentrador = true;
+            try
+            {
+                ddlConcentrador.DataSource = config?.concentradores;
+                ddlConcentrador.DisplayMember = "nombre";
+                ddlConcentrador.ValueMember = "host";
+            }
+            finally
+            {
+                _suprimirEventoConcentrador = false;
+            }
+
+            _hostConcentradorTrackeado = ddlConcentrador.SelectedValue?.ToString();
         }
         catch (Exception ex)
         {
             MessageBox.Show("Error cargando concentradores: " + ex.Message);
         }
+    }
+
+    private void ddlConcentrador_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        if (_suprimirEventoConcentrador)
+            return;
+        // Con DataSource, SelectedValue a veces aún no está actualizado en este mismo mensaje.
+        BeginInvoke(new Action(NotificarCambioConcentradorSiCorresponde));
+    }
+
+    private void ddlConcentrador_SelectionChangeCommitted(object? sender, EventArgs e)
+    {
+        if (_suprimirEventoConcentrador)
+            return;
+        NotificarCambioConcentradorSiCorresponde();
+    }
+
+    private void NotificarCambioConcentradorSiCorresponde()
+    {
+        if (_suprimirEventoConcentrador)
+            return;
+
+        var host = ddlConcentrador.SelectedValue?.ToString();
+        if (string.IsNullOrWhiteSpace(host))
+            return;
+
+        if (string.Equals(host, _hostConcentradorTrackeado, StringComparison.Ordinal))
+            return;
+
+        _hostConcentradorTrackeado = host;
+        ResetUiTrasCambioConcentrador();
+    }
+
+    /// <summary>
+    /// Vuelve Logs, Reinicio y SQL al estado inicial al elegir otro concentrador (datos del anterior no aplican al nuevo host).
+    /// </summary>
+    private void ResetUiTrasCambioConcentrador()
+    {
+        DetenerMonitoreoApiLog(soloSiCorre: true, escribirEnLog: false);
+
+        _lineasMostradas.Clear();
+        _matches.Clear();
+        _currentMatchIndex = -1;
+        richTextBox1.Clear();
+        txtSearchLog.Clear();
+
+        LimpiarPanelDockers();
+        lblReinicioSinDockers.Visible = false;
+        panelReinicioTodosBar.Visible = false;
+        flowLayoutPanelDockers.Visible = false;
+        btnReiniciar.Visible = false;
+        panelReinicioPie.Visible = false;
+        progressBarReinicio.Visible = false;
+        lblReinicioBusy.Visible = false;
+        btnCargarDockers.Enabled = true;
+        SetCargarDockersBusy(false);
+
+        _sqlEsquemaActual = null;
+        _sqlMenuFilaIndice = -1;
+        dgvSqlListaTablas.Rows.Clear();
+        dgvSqlListaTablas.ClearSelection();
+        LimpiarGridResultadosSql();
+        dgvSqlResultados.ClearSelection();
+        txtSqlEditor.Clear();
+        SetSqlConexionBusy(false);
+        SetSqlConsultaBusy(false);
+        btnSqlConectar.Enabled = true;
+        btnSqlEjecutar.Enabled = true;
+        btnSqlExportarExcel.Enabled = true;
     }
 
     // 🔥 APILOG
@@ -214,11 +305,30 @@ public partial class Index : Form
     // 🔴 DETENER
     private void btnDetener_Click(object sender, EventArgs e)
     {
-        btnApiLog.Enabled = true;
-        btnDetener.Enabled = false;
+        DetenerMonitoreoApiLog("Monitoreo detenido.");
+    }
+
+    /// <summary>Detiene el bucle de ApiLog y restaura botones. Si <paramref name="soloSiCorre"/> es true, no hace nada si no había monitoreo activo.</summary>
+    private void DetenerMonitoreoApiLog(string? mensaje = null, bool soloSiCorre = false, bool escribirEnLog = true)
+    {
+        if (soloSiCorre && !_running)
+            return;
 
         _running = false;
-        Log("Monitoreo detenido.");
+        btnApiLog.Enabled = true;
+        btnDetener.Enabled = false;
+        if (escribirEnLog && !string.IsNullOrEmpty(mensaje))
+            Log(mensaje);
+    }
+
+    private void tabControl1_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        // Reinicio = 1, SQL = 2 — al salir de Logs se detiene ApiLog si estaba en marcha
+        var ix = tabControl1.SelectedIndex;
+        if (ix != 1 && ix != 2)
+            return;
+
+        DetenerMonitoreoApiLog("Monitoreo detenido (cambio de pestaña).", soloSiCorre: true);
     }
 
     // 🔍 BUSCAR
@@ -240,11 +350,7 @@ public partial class Index : Form
             if (r == DialogResult.No)
                 return;
 
-            _running = false;
-            btnApiLog.Enabled = true;
-            btnDetener.Enabled = false;
-
-            Log("Monitoreo detenido por búsqueda.");
+            DetenerMonitoreoApiLog("Monitoreo detenido por búsqueda.");
         }
 
         BuscarYResaltar(texto);
@@ -368,6 +474,7 @@ public partial class Index : Form
         }
 
         btnCargarDockers.Enabled = false;
+        SetCargarDockersBusy(true);
         try
         {
             string raw = "";
@@ -387,8 +494,17 @@ public partial class Index : Form
         }
         finally
         {
+            SetCargarDockersBusy(false);
             btnCargarDockers.Enabled = true;
         }
+    }
+
+    private void SetCargarDockersBusy(bool busy)
+    {
+        progressBarCargarDockers.Visible = busy;
+        lblCargarDockersBusy.Visible = busy;
+        if (busy)
+            progressBarCargarDockers.Style = ProgressBarStyle.Marquee;
     }
 
     private void MostrarListaDockers(IReadOnlyList<(string Id, string Name)> contenedores)
@@ -401,6 +517,7 @@ public partial class Index : Form
             panelReinicioTodosBar.Visible = false;
             flowLayoutPanelDockers.Visible = false;
             btnReiniciar.Visible = false;
+            panelReinicioPie.Visible = false;
             return;
         }
 
@@ -408,6 +525,7 @@ public partial class Index : Form
         panelReinicioTodosBar.Visible = true;
         flowLayoutPanelDockers.Visible = true;
         btnReiniciar.Visible = true;
+        panelReinicioPie.Visible = true;
 
         _syncingDockerChecks = true;
         chkTodosDocker.Checked = true;
