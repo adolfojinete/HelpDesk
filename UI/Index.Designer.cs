@@ -48,12 +48,15 @@
             splitContainerSql = new SplitContainer();
             dgvSqlListaTablas = new DataGridView();
             panelSqlDerecho = new Panel();
+            tabControlSqlScripts = new TabControl();
+            tabPageSqlScript1 = new TabPage();
             splitSqlEditorResultados = new SplitContainer();
             txtSqlEditor = new TextBox();
             dgvSqlResultados = new DataGridView();
             panelSqlBarEjecutar = new Panel();
             tableLayoutPanelSqlEjecutar = new TableLayoutPanel();
             btnSqlEjecutar = new Button();
+            btnSqlNuevoScript = new Button();
             progressBarSqlConsulta = new ProgressBar();
             lblSqlConsultaBusy = new Label();
             btnSqlExportarExcel = new Button();
@@ -63,6 +66,8 @@
             btnSqlConectar = new Button();
             contextMenuSqlTablas = new ContextMenuStrip(components);
             toolStripMenuItemSqlGenerar = new ToolStripMenuItem();
+            contextMenuSqlScriptPestaña = new ContextMenuStrip(components);
+            toolStripMenuItemCerrarPestañaSql = new ToolStripMenuItem();
             panelTop.SuspendLayout();
             tabControl1.SuspendLayout();
             tabPage1.SuspendLayout();
@@ -79,6 +84,8 @@
             splitContainerSql.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)dgvSqlListaTablas).BeginInit();
             panelSqlDerecho.SuspendLayout();
+            tabPageSqlScript1.SuspendLayout();
+            tabControlSqlScripts.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)splitSqlEditorResultados).BeginInit();
             splitSqlEditorResultados.Panel1.SuspendLayout();
             splitSqlEditorResultados.Panel2.SuspendLayout();
@@ -88,6 +95,7 @@
             tableLayoutPanelSqlEjecutar.SuspendLayout();
             panelSqlToolbar.SuspendLayout();
             contextMenuSqlTablas.SuspendLayout();
+            contextMenuSqlScriptPestaña.SuspendLayout();
             SuspendLayout();
             // 
             // panelTop
@@ -430,7 +438,7 @@
             // 
             // panelSqlDerecho
             // 
-            panelSqlDerecho.Controls.Add(splitSqlEditorResultados);
+            panelSqlDerecho.Controls.Add(tabControlSqlScripts);
             panelSqlDerecho.Controls.Add(panelSqlBarEjecutar);
             panelSqlDerecho.Dock = DockStyle.Fill;
             panelSqlDerecho.Location = new Point(0, 0);
@@ -438,10 +446,34 @@
             panelSqlDerecho.Size = new Size(1090, 520);
             panelSqlDerecho.TabIndex = 0;
             // 
+            // tabControlSqlScripts
+            // 
+            tabControlSqlScripts.Controls.Add(tabPageSqlScript1);
+            tabControlSqlScripts.Dock = DockStyle.Fill;
+            tabControlSqlScripts.Location = new Point(0, 56);
+            tabControlSqlScripts.Name = "tabControlSqlScripts";
+            tabControlSqlScripts.Padding = new Point(4, 3);
+            tabControlSqlScripts.SelectedIndex = 0;
+            tabControlSqlScripts.Size = new Size(1090, 464);
+            tabControlSqlScripts.TabIndex = 2;
+            tabControlSqlScripts.SelectedIndexChanged += tabControlSqlScripts_SelectedIndexChanged;
+            tabControlSqlScripts.MouseDown += tabControlSqlScripts_MouseDown;
+            // 
+            // tabPageSqlScript1
+            // 
+            tabPageSqlScript1.Controls.Add(splitSqlEditorResultados);
+            tabPageSqlScript1.Location = new Point(4, 37);
+            tabPageSqlScript1.Name = "tabPageSqlScript1";
+            tabPageSqlScript1.Padding = new Padding(3);
+            tabPageSqlScript1.Size = new Size(1074, 417);
+            tabPageSqlScript1.TabIndex = 0;
+            tabPageSqlScript1.Text = "Script 1";
+            tabPageSqlScript1.UseVisualStyleBackColor = true;
+            // 
             // splitSqlEditorResultados
             // 
             splitSqlEditorResultados.Dock = DockStyle.Fill;
-            splitSqlEditorResultados.Location = new Point(0, 56);
+            splitSqlEditorResultados.Location = new Point(3, 3);
             splitSqlEditorResultados.Name = "splitSqlEditorResultados";
             splitSqlEditorResultados.Orientation = Orientation.Horizontal;
             // 
@@ -503,15 +535,17 @@
             // 
             // tableLayoutPanelSqlEjecutar
             // 
-            tableLayoutPanelSqlEjecutar.ColumnCount = 4;
-            tableLayoutPanelSqlEjecutar.ColumnStyles.Add(new ColumnStyle());
+            tableLayoutPanelSqlEjecutar.ColumnCount = 5;
+            tableLayoutPanelSqlEjecutar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            tableLayoutPanelSqlEjecutar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             tableLayoutPanelSqlEjecutar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200F));
             tableLayoutPanelSqlEjecutar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            tableLayoutPanelSqlEjecutar.ColumnStyles.Add(new ColumnStyle());
+            tableLayoutPanelSqlEjecutar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             tableLayoutPanelSqlEjecutar.Controls.Add(btnSqlEjecutar, 0, 0);
-            tableLayoutPanelSqlEjecutar.Controls.Add(progressBarSqlConsulta, 1, 0);
-            tableLayoutPanelSqlEjecutar.Controls.Add(lblSqlConsultaBusy, 2, 0);
-            tableLayoutPanelSqlEjecutar.Controls.Add(btnSqlExportarExcel, 3, 0);
+            tableLayoutPanelSqlEjecutar.Controls.Add(btnSqlNuevoScript, 1, 0);
+            tableLayoutPanelSqlEjecutar.Controls.Add(progressBarSqlConsulta, 2, 0);
+            tableLayoutPanelSqlEjecutar.Controls.Add(lblSqlConsultaBusy, 3, 0);
+            tableLayoutPanelSqlEjecutar.Controls.Add(btnSqlExportarExcel, 4, 0);
             tableLayoutPanelSqlEjecutar.Dock = DockStyle.Fill;
             tableLayoutPanelSqlEjecutar.Location = new Point(0, 0);
             tableLayoutPanelSqlEjecutar.Margin = new Padding(0);
@@ -534,10 +568,22 @@
             btnSqlEjecutar.UseVisualStyleBackColor = true;
             btnSqlEjecutar.Click += btnSqlEjecutar_Click;
             // 
+            // btnSqlNuevoScript
+            // 
+            btnSqlNuevoScript.Anchor = AnchorStyles.Left;
+            btnSqlNuevoScript.Location = new Point(148, 9);
+            btnSqlNuevoScript.Margin = new Padding(0, 0, 8, 0);
+            btnSqlNuevoScript.Name = "btnSqlNuevoScript";
+            btnSqlNuevoScript.Size = new Size(150, 36);
+            btnSqlNuevoScript.TabIndex = 4;
+            btnSqlNuevoScript.Text = "Nuevo script";
+            btnSqlNuevoScript.UseVisualStyleBackColor = true;
+            btnSqlNuevoScript.Click += btnSqlNuevoScript_Click;
+            // 
             // progressBarSqlConsulta
             // 
             progressBarSqlConsulta.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            progressBarSqlConsulta.Location = new Point(148, 14);
+            progressBarSqlConsulta.Location = new Point(306, 14);
             progressBarSqlConsulta.Margin = new Padding(0, 0, 8, 0);
             progressBarSqlConsulta.MarqueeAnimationSpeed = 35;
             progressBarSqlConsulta.Name = "progressBarSqlConsulta";
@@ -551,7 +597,7 @@
             lblSqlConsultaBusy.Anchor = AnchorStyles.Left | AnchorStyles.Right;
             lblSqlConsultaBusy.AutoEllipsis = true;
             lblSqlConsultaBusy.ForeColor = SystemColors.GrayText;
-            lblSqlConsultaBusy.Location = new Point(348, 14);
+            lblSqlConsultaBusy.Location = new Point(506, 14);
             lblSqlConsultaBusy.Margin = new Padding(0, 0, 8, 0);
             lblSqlConsultaBusy.Name = "lblSqlConsultaBusy";
             lblSqlConsultaBusy.Size = new Size(564, 25);
@@ -631,6 +677,20 @@
             toolStripMenuItemSqlGenerar.Text = "Generar Script";
             toolStripMenuItemSqlGenerar.Click += toolStripMenuItemSqlGenerar_Click;
             // 
+            // contextMenuSqlScriptPestaña
+            // 
+            contextMenuSqlScriptPestaña.ImageScalingSize = new Size(24, 24);
+            contextMenuSqlScriptPestaña.Items.AddRange(new ToolStripItem[] { toolStripMenuItemCerrarPestañaSql });
+            contextMenuSqlScriptPestaña.Name = "contextMenuSqlScriptPestaña";
+            contextMenuSqlScriptPestaña.Size = new Size(220, 36);
+            // 
+            // toolStripMenuItemCerrarPestañaSql
+            // 
+            toolStripMenuItemCerrarPestañaSql.Name = "toolStripMenuItemCerrarPestañaSql";
+            toolStripMenuItemCerrarPestañaSql.Size = new Size(219, 32);
+            toolStripMenuItemCerrarPestañaSql.Text = "Cerrar esta pestaña";
+            toolStripMenuItemCerrarPestañaSql.Click += toolStripMenuItemCerrarPestañaSql_Click;
+            // 
             // Index
             // 
             AutoScaleDimensions = new SizeF(10F, 25F);
@@ -663,6 +723,8 @@
             splitContainerSql.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)dgvSqlListaTablas).EndInit();
             panelSqlDerecho.ResumeLayout(false);
+            tabPageSqlScript1.ResumeLayout(false);
+            tabControlSqlScripts.ResumeLayout(false);
             splitSqlEditorResultados.Panel1.ResumeLayout(false);
             splitSqlEditorResultados.Panel1.PerformLayout();
             splitSqlEditorResultados.Panel2.ResumeLayout(false);
@@ -674,6 +736,7 @@
             panelSqlToolbar.ResumeLayout(false);
             panelSqlToolbar.PerformLayout();
             contextMenuSqlTablas.ResumeLayout(false);
+            contextMenuSqlScriptPestaña.ResumeLayout(false);
             ResumeLayout(false);
         }
 
@@ -704,9 +767,12 @@
         private SplitContainer splitContainerSql;
         private DataGridView dgvSqlListaTablas;
         private Panel panelSqlDerecho;
+        private TabControl tabControlSqlScripts;
+        private TabPage tabPageSqlScript1;
         private Panel panelSqlBarEjecutar;
         private TableLayoutPanel tableLayoutPanelSqlEjecutar;
         private Button btnSqlEjecutar;
+        private Button btnSqlNuevoScript;
         private ProgressBar progressBarSqlConsulta;
         private Label lblSqlConsultaBusy;
         private Button btnSqlExportarExcel;
@@ -715,6 +781,8 @@
         private DataGridView dgvSqlResultados;
         private ContextMenuStrip contextMenuSqlTablas;
         private ToolStripMenuItem toolStripMenuItemSqlGenerar;
+        private ContextMenuStrip contextMenuSqlScriptPestaña;
+        private ToolStripMenuItem toolStripMenuItemCerrarPestañaSql;
 
         private Label label1;
         private ComboBox ddlConcentrador;

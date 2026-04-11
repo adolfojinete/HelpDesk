@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using Newtonsoft.Json;
 using System.Configuration;
 using System.Data;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Drawing;
@@ -24,6 +25,9 @@ public partial class Index : Form
 
     /// <summary>Índice de fila donde se abrió el menú contextual (clic derecho); más fiable que CurrentRow tras Show.</summary>
     private int _sqlMenuFilaIndice = -1;
+
+    /// <summary>Numeración para títulos "Script n" en nuevas pestañas (la primera es Script 1 en diseño).</summary>
+    private int _sqlScriptContador = 1;
 
     /// <summary>Evita resetear la UI al asignar el DataSource del combo al iniciar.</summary>
     private bool _suprimirEventoConcentrador;
@@ -76,20 +80,28 @@ public partial class Index : Form
             /* tamaño inicial del host aún no aplicado */
         }
 
+        foreach (TabPage tp in tabControlSqlScripts.TabPages)
+            AjustarSplitterEditorResultadosEnPestaña(tp);
+    }
+
+    private static void AjustarSplitterEditorResultadosEnPestaña(TabPage tp)
+    {
         try
         {
-            var h = splitSqlEditorResultados.Height;
-            var sw = splitSqlEditorResultados.SplitterWidth;
-            if (h > 0)
-            {
-                var max1 = h - splitSqlEditorResultados.Panel2MinSize - sw;
-                var min1 = splitSqlEditorResultados.Panel1MinSize;
-                if (max1 >= min1)
-                    splitSqlEditorResultados.SplitterDistance = Math.Clamp(200, min1, max1);
-            }
+            if (!TryExtraerSplitSqlDePestaña(tp, out var split))
+                return;
+            var h = split.Height;
+            var sw = split.SplitterWidth;
+            if (h <= 0)
+                return;
+            var max1 = h - split.Panel2MinSize - sw;
+            var min1 = split.Panel1MinSize;
+            if (max1 >= min1)
+                split.SplitterDistance = Math.Clamp(200, min1, max1);
         }
         catch
         {
+            /* tamaño aún no aplicado */
         }
     }
 
@@ -241,12 +253,11 @@ public partial class Index : Form
         dgvSqlListaTablas.Rows.Clear();
         dgvSqlListaTablas.ClearSelection();
         LimpiarGridResultadosSql();
-        dgvSqlResultados.ClearSelection();
-        txtSqlEditor.Clear();
         SetSqlConexionBusy(false);
         SetSqlConsultaBusy(false);
         btnSqlConectar.Enabled = true;
         btnSqlEjecutar.Enabled = true;
+        btnSqlNuevoScript.Enabled = true;
         btnSqlExportarExcel.Enabled = true;
     }
 
@@ -952,6 +963,161 @@ public partial class Index : Form
         await EjecutarConsultaSqlAsync();
     }
 
+    private void btnSqlNuevoScript_Click(object? sender, EventArgs e)
+    {
+        _sqlScriptContador++;
+        CrearNuevaPestañaSqlScriptVacia($"Script {_sqlScriptContador}");
+    }
+
+    private void tabControlSqlScripts_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        if (tabControlSqlScripts.SelectedTab is { } tp)
+            AjustarSplitterEditorResultadosEnPestaña(tp);
+    }
+
+    private void tabControlSqlScripts_MouseDown(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Right)
+            return;
+        for (var i = 0; i < tabControlSqlScripts.TabCount; i++)
+        {
+            if (!tabControlSqlScripts.GetTabRect(i).Contains(e.Location))
+                continue;
+            tabControlSqlScripts.SelectedIndex = i;
+            contextMenuSqlScriptPestaña.Show(tabControlSqlScripts, e.Location);
+            return;
+        }
+    }
+
+    private void toolStripMenuItemCerrarPestañaSql_Click(object? sender, EventArgs e)
+    {
+        var tab = tabControlSqlScripts.SelectedTab;
+        if (tab is null)
+            return;
+        if (ReferenceEquals(tab, tabPageSqlScript1))
+        {
+            MessageBox.Show(
+                "La pestaña «Script 1» no se puede cerrar (contiene el editor principal del diseño). "
+                + "Cierre las pestañas añadidas con «Nuevo script» o vacíe el texto desde aquí.",
+                "SQL",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        if (tabControlSqlScripts.TabCount <= 1)
+        {
+            MessageBox.Show(
+                "Debe quedar al menos una pestaña de script.",
+                "SQL",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        var ix = tabControlSqlScripts.TabPages.IndexOf(tab);
+        tabControlSqlScripts.TabPages.Remove(tab);
+        tab.Dispose();
+        if (ix >= tabControlSqlScripts.TabCount)
+            ix = tabControlSqlScripts.TabCount - 1;
+        if (ix >= 0)
+            tabControlSqlScripts.SelectedIndex = ix;
+    }
+
+    private void CrearNuevaPestañaSqlScriptVacia(string titulo)
+    {
+        var tab = new TabPage(titulo)
+        {
+            Padding = new Padding(3),
+            UseVisualStyleBackColor = true,
+        };
+
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Horizontal,
+            Panel1MinSize = 80,
+            Panel2MinSize = 80,
+            SplitterWidth = 6,
+            SplitterDistance = 120,
+        };
+
+        var tb = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            Multiline = true,
+            AcceptsReturn = true,
+            AcceptsTab = true,
+            Font = new Font("Consolas", 10f),
+            ScrollBars = ScrollBars.Vertical,
+            WordWrap = false,
+            TabIndex = 0,
+        };
+
+        var dgv = new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            ReadOnly = true,
+            MultiSelect = false,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            BackgroundColor = SystemColors.Window,
+            BorderStyle = BorderStyle.Fixed3D,
+            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
+            RowHeadersWidth = 40,
+            TabIndex = 0,
+        };
+        dgv.RowTemplate.Height = 26;
+        dgv.ColumnHeadersDefaultCellStyle.Font = new Font(dgv.Font, FontStyle.Bold);
+
+        split.Panel1.Controls.Add(tb);
+        split.Panel2.Controls.Add(dgv);
+        tab.Controls.Add(split);
+
+        tabControlSqlScripts.TabPages.Add(tab);
+        tabControlSqlScripts.SelectedTab = tab;
+        AjustarSplitterEditorResultadosEnPestaña(tab);
+    }
+
+    private bool TryObtenerScriptSqlActivo([NotNullWhen(true)] out TextBox? editor, [NotNullWhen(true)] out DataGridView? grid) =>
+        TryExtraerEditorYGrillaDePestañaSql(tabControlSqlScripts.SelectedTab, out editor, out grid);
+
+    private static bool TryExtraerSplitSqlDePestaña(TabPage? page, [NotNullWhen(true)] out SplitContainer? split)
+    {
+        split = null;
+        if (page is null)
+            return false;
+        foreach (Control c in page.Controls)
+        {
+            if (c is SplitContainer s)
+            {
+                split = s;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryExtraerEditorYGrillaDePestañaSql(
+        TabPage? page,
+        [NotNullWhen(true)] out TextBox? editor,
+        [NotNullWhen(true)] out DataGridView? grid)
+    {
+        editor = null;
+        grid = null;
+        if (!TryExtraerSplitSqlDePestaña(page, out var split) || split is null)
+            return false;
+        if (split.Panel1.Controls.Count == 0 || split.Panel2.Controls.Count == 0)
+            return false;
+        if (split.Panel1.Controls[0] is not TextBox tb || split.Panel2.Controls[0] is not DataGridView dgv)
+            return false;
+        editor = tb;
+        grid = dgv;
+        return true;
+    }
+
     private async Task GenerarScriptYEjecutarAsync()
     {
         var idx = _sqlMenuFilaIndice;
@@ -974,13 +1140,25 @@ public partial class Index : Form
         if (!EsIdentificadorSqlSimple(schema))
             schema = "concentrador";
 
-        txtSqlEditor.Text = $"SELECT * FROM {schema}.{nombreTabla} LIMIT 300;";
+        if (!TryObtenerScriptSqlActivo(out var editor, out _))
+        {
+            MessageBox.Show("No hay una pestaña de script activa.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        editor.Text = $"SELECT * FROM {schema}.{nombreTabla} LIMIT 300;";
         await EjecutarConsultaSqlAsync();
     }
 
     private async Task EjecutarConsultaSqlAsync()
     {
-        var sql = NormalizarSqlParaEnvioPorShell(txtSqlEditor.Text);
+        if (!TryObtenerScriptSqlActivo(out var editorActivo, out var gridActivo))
+        {
+            MessageBox.Show("No hay una pestaña de script activa.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var sql = NormalizarSqlParaEnvioPorShell(editorActivo.Text);
         if (string.IsNullOrWhiteSpace(sql))
         {
             MessageBox.Show("Escriba una consulta SQL.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1014,6 +1192,7 @@ public partial class Index : Form
         }
 
         btnSqlEjecutar.Enabled = false;
+        btnSqlNuevoScript.Enabled = false;
         btnSqlConectar.Enabled = false;
         btnSqlExportarExcel.Enabled = false;
         SetSqlConsultaBusy(true);
@@ -1064,12 +1243,12 @@ public partial class Index : Form
                 return;
             }
 
-            dgvSqlResultados.AutoGenerateColumns = true;
-            dgvSqlResultados.DataSource = null;
-            dgvSqlResultados.Columns.Clear();
-            dgvSqlResultados.DataSource = tabla;
+            gridActivo.AutoGenerateColumns = true;
+            gridActivo.DataSource = null;
+            gridActivo.Columns.Clear();
+            gridActivo.DataSource = tabla;
 
-            AjustarColumnasResultadosSqlDespuesDeCargar();
+            AjustarColumnasResultadosSqlDespuesDeCargar(gridActivo);
 
             if (tabla.Rows.Count == 0)
             {
@@ -1088,6 +1267,7 @@ public partial class Index : Form
         {
             SetSqlConsultaBusy(false);
             btnSqlEjecutar.Enabled = true;
+            btnSqlNuevoScript.Enabled = true;
             btnSqlConectar.Enabled = true;
             btnSqlExportarExcel.Enabled = true;
         }
@@ -1104,13 +1284,13 @@ public partial class Index : Form
     /// <summary>
     /// Cabeceras en negrita y anchos iniciales; luego el usuario puede redimensionar columnas a mano.
     /// </summary>
-    private void AjustarColumnasResultadosSqlDespuesDeCargar()
+    private static void AjustarColumnasResultadosSqlDespuesDeCargar(DataGridView dgv)
     {
-        dgvSqlResultados.ColumnHeadersDefaultCellStyle.Font = new Font(dgvSqlResultados.Font, FontStyle.Bold);
-        foreach (DataGridViewColumn c in dgvSqlResultados.Columns)
+        dgv.ColumnHeadersDefaultCellStyle.Font = new Font(dgv.Font, FontStyle.Bold);
+        foreach (DataGridViewColumn c in dgv.Columns)
             c.AutoSizeMode = DataGridViewAutoSizeColumnMode.AllCells;
-        dgvSqlResultados.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.AllCells);
-        foreach (DataGridViewColumn c in dgvSqlResultados.Columns)
+        dgv.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.AllCells);
+        foreach (DataGridViewColumn c in dgv.Columns)
         {
             c.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
             c.MinimumWidth = 56;
@@ -1119,7 +1299,13 @@ public partial class Index : Form
 
     private void btnSqlExportarExcel_Click(object? sender, EventArgs e)
     {
-        if (dgvSqlResultados.Columns.Count == 0 || dgvSqlResultados.Rows.Count == 0)
+        if (!TryObtenerScriptSqlActivo(out _, out var gridActivo))
+        {
+            MessageBox.Show("No hay una pestaña de script activa.", "SQL", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (gridActivo.Columns.Count == 0 || gridActivo.Rows.Count == 0)
         {
             MessageBox.Show(
                 "No hay datos en la grilla para exportar. Ejecute una consulta primero.",
@@ -1143,13 +1329,13 @@ public partial class Index : Form
         {
             using var wb = new XLWorkbook();
             var ws = wb.Worksheets.Add("Resultados");
-            var colCount = dgvSqlResultados.Columns.Count;
-            var rowCount = dgvSqlResultados.Rows.Count;
+            var colCount = gridActivo.Columns.Count;
+            var rowCount = gridActivo.Rows.Count;
 
             for (var c = 0; c < colCount; c++)
             {
                 var cell = ws.Cell(1, c + 1);
-                cell.Value = dgvSqlResultados.Columns[c].HeaderText;
+                cell.Value = gridActivo.Columns[c].HeaderText;
                 cell.Style.Font.Bold = true;
             }
 
@@ -1157,7 +1343,7 @@ public partial class Index : Form
             {
                 for (var c = 0; c < colCount; c++)
                 {
-                    var v = dgvSqlResultados.Rows[r].Cells[c].Value;
+                    var v = gridActivo.Rows[r].Cells[c].Value;
                     ws.Cell(r + 2, c + 1).Value = v?.ToString() ?? "";
                 }
             }
@@ -1174,7 +1360,13 @@ public partial class Index : Form
 
     private void LimpiarGridResultadosSql()
     {
-        dgvSqlResultados.DataSource = null;
-        dgvSqlResultados.Columns.Clear();
+        foreach (TabPage tp in tabControlSqlScripts.TabPages)
+        {
+            if (!TryExtraerEditorYGrillaDePestañaSql(tp, out var ed, out var dgv))
+                continue;
+            dgv.DataSource = null;
+            dgv.Columns.Clear();
+            ed.Clear();
+        }
     }
 }
