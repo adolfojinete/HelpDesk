@@ -1,6 +1,10 @@
 ﻿{
   "concentradores": [
     {
+      "nombre": "alameda",
+      "host": "alameda"
+    },
+    {
       "nombre": "moran valverde",
       "host": "moranvalverde"
     },

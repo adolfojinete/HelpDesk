@@ -35,6 +35,9 @@ internal static class ShowTablesOutputParser
             if (s.StartsWith("docker", StringComparison.OrdinalIgnoreCase) ||
                 s.StartsWith("mysql", StringComparison.OrdinalIgnoreCase) ||
                 s.StartsWith("mariadb", StringComparison.OrdinalIgnoreCase) ||
+                s.TrimStart('+', ' ', '\t').StartsWith("printf", StringComparison.OrdinalIgnoreCase) ||
+                (s.Contains("| base64 -d |", StringComparison.OrdinalIgnoreCase) &&
+                 s.Contains("docker exec", StringComparison.OrdinalIgnoreCase)) ||
                 s.Contains("Tables_in_", StringComparison.OrdinalIgnoreCase))
                 continue;
 

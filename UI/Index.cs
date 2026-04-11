@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using Newtonsoft.Json;
 using System.Configuration;
 using System.Data;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Drawing;
 
@@ -886,19 +887,32 @@ public partial class Index : Form
     private static string ComandoDockerMysqlShowTables(string contenedor, string clienteBinario, string usuario, string password, string esquema)
     {
         var sql = $"USE `{esquema}`; SHOW TABLES;";
-        return $"docker exec {contenedor} {clienteBinario} --user={usuario} --password={SshManager.BashSingleQuote(password)} -N -B -e {SshManager.BashSingleQuote(sql)}";
+        return ComandoDockerMysqlPorStdinBase64(contenedor, clienteBinario, usuario, password, sql, "-N -B");
     }
 
     private static string ComandoDockerMysqlEjecutar(string contenedor, string clienteBinario, string usuario, string password, string sqlConsulta)
     {
         sqlConsulta = NormalizarSqlParaEnvioPorShell(sqlConsulta);
-        return $"docker exec {contenedor} {clienteBinario} --user={usuario} --password={SshManager.BashSingleQuote(password)} -B -e {SshManager.BashSingleQuote(sqlConsulta)}";
+        return ComandoDockerMysqlPorStdinBase64(contenedor, clienteBinario, usuario, password, sqlConsulta, "-B");
     }
 
     /// <summary>
-    /// El comando se envía por shell con WriteLine; si el SQL lleva \n, el intérprete corta la orden antes del cierre de comillas de -e.
-    /// Se reemplazan saltos de línea por espacios (equivalente habitual para el cliente mysql/mariadb).
+    /// Evita pasar el SQL en <c>-e '...'</c>: el shell interpretaría <c>%</c>, <c>!</c>, comillas, etc.
+    /// El texto va en base64 → <c>stdin</c> de <c>mariadb</c> dentro de <c>docker exec -i</c>.
     /// </summary>
+    private static string ComandoDockerMysqlPorStdinBase64(
+        string contenedor,
+        string clienteBinario,
+        string usuario,
+        string password,
+        string sqlUtf8,
+        string argumentosMysqlTrasPassword)
+    {
+        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(sqlUtf8));
+        return $"printf '%s' {SshManager.BashSingleQuote(b64)} | base64 -d | docker exec -i {contenedor} {clienteBinario} --user={usuario} --password={SshManager.BashSingleQuote(password)} {argumentosMysqlTrasPassword} 2>&1";
+    }
+
+    /// <summary>Prepara el SQL del editor: trim y colapsa saltos (opcional; el transporte por stdin admite multilínea).</summary>
     private static string NormalizarSqlParaEnvioPorShell(string sql)
     {
         sql = sql.Trim();
@@ -960,7 +974,7 @@ public partial class Index : Form
         if (!EsIdentificadorSqlSimple(schema))
             schema = "concentrador";
 
-        txtSqlEditor.Text = $"SELECT * FROM `{schema}`.`{nombreTabla}` LIMIT 300;";
+        txtSqlEditor.Text = $"SELECT * FROM {schema}.{nombreTabla} LIMIT 300;";
         await EjecutarConsultaSqlAsync();
     }
 
@@ -1024,13 +1038,11 @@ public partial class Index : Form
                     "SQL",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
-                LimpiarGridResultadosSql();
                 return;
             }
 
             if (tabla is null)
             {
-                LimpiarGridResultadosSql();
                 return;
             }
 
@@ -1042,12 +1054,13 @@ public partial class Index : Form
                     : preview.Trim();
                 MessageBox.Show(
                     "No se pudieron leer columnas del resultado (salida vacía o solo avisos del shell).\n\n"
+                    + "No use comillas simples (') alrededor de esquema o tabla; si hace falta delimitar identificadores, use comillas invertidas (`).\n"
+                    + "Ejemplo: SELECT * FROM concentrador.terminal WHERE nombre = '11050845' LIMIT 300;\n\n"
                     + "Revise la consulta, la conexión SSH y, si hace falta, aumente CommandWaitMs en App.config.\n\n"
                     + "Recorte de salida recibida:\n" + preview,
                     "SQL",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
-                LimpiarGridResultadosSql();
                 return;
             }
 
@@ -1070,7 +1083,6 @@ public partial class Index : Form
         catch (Exception ex)
         {
             MessageBox.Show("Error al ejecutar la consulta: " + ex.Message, "SQL", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            LimpiarGridResultadosSql();
         }
         finally
         {

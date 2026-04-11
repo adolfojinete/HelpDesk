@@ -66,6 +66,13 @@ internal static class MariaDbBatchTsvParser
         if (t.Contains('\t'))
             return false;
 
+        // Eco del comando (transporte SQL por stdin vía base64 en el shell remoto).
+        if (t.TrimStart('+', ' ', '\t').StartsWith("printf ", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (t.IndexOf("| base64 -d |", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            t.IndexOf("docker exec", StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+
         if (t.StartsWith("docker ", StringComparison.OrdinalIgnoreCase) ||
             t.StartsWith("mariadb", StringComparison.OrdinalIgnoreCase) ||
             t.StartsWith("mysql", StringComparison.OrdinalIgnoreCase) ||
